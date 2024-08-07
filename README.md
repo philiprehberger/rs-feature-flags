@@ -12,7 +12,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-philiprehberger-feature-flags = "0.1"
+philiprehberger-feature-flags = "0.1.4"
 ```
 
 To enable JSON deserialization via serde:
