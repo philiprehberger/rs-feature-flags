@@ -12,7 +12,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-philiprehberger-feature-flags = "0.1.4"
+philiprehberger-feature-flags = "0.1.5"
 ```
 
 To enable JSON deserialization via serde:
@@ -70,6 +70,14 @@ println!("beta-feature enabled: {enabled}");
 | `.is_enabled_for(name, ctx)` | Evaluate a flag with full context |
 | `.all_flags()` | Get a sorted list of all flag names |
 | `FeatureFlags::from_json(json)` | Parse flags from JSON (requires `serde` feature) |
+
+
+## Development
+
+```bash
+cargo test
+cargo clippy -- -D warnings
+```
 
 ## License
 
