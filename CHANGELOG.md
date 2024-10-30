@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- Add user targeting (`allowed_users`) and role targeting (`allowed_roles`) to `FlagConfig`
+- Add attribute-based evaluation with `required_attributes` on `FlagConfig`
+- Add A/B test variant support via `get_variant()` with deterministic hashing
+- Add `set_config()` and `evaluate_with_config()` methods on `FeatureFlags`
+- Add `with_role()` convenience builder on `Context`
+- Evaluation order: environment -> required attributes -> allowed users -> allowed roles -> rollout -> enabled
+
 ## 0.1.5
 
 - Add readme, rust-version, documentation to Cargo.toml
