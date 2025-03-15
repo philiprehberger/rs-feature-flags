@@ -3,11 +3,11 @@
 //! # Example
 //!
 //! ```rust
-//! use philiprehberger_feature_flags::{FlagStore, Flag, Rollout};
+//! use philiprehberger_feature_flags::{FeatureFlags, FlagConfig};
 //!
-//! let mut store = FlagStore::new();
-//! store.add(Flag::new("dark_mode").enabled(true));
-//! assert!(store.is_enabled("dark_mode", None));
+//! let mut flags = FeatureFlags::new();
+//! flags.set("dark_mode", FlagConfig::new(true));
+//! assert!(flags.is_enabled("dark_mode"));
 //! ```
 
 use std::collections::HashMap;
