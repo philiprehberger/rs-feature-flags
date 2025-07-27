@@ -1,6 +1,6 @@
 [package]
 name = "philiprehberger-feature-flags"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 authors = ["Philip Rehberger"]
 description = "In-memory feature flag evaluation with rollout, environment, targeting, and A/B variant support for Rust"
