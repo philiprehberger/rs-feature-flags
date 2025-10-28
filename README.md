@@ -3,6 +3,7 @@
 [![CI](https://github.com/philiprehberger/rs-feature-flags/actions/workflows/ci.yml/badge.svg)](https://github.com/philiprehberger/rs-feature-flags/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/philiprehberger-feature-flags.svg)](https://crates.io/crates/philiprehberger-feature-flags)
 [![License](https://img.shields.io/github/license/philiprehberger/rs-feature-flags)](LICENSE)
+[![Sponsor](https://img.shields.io/badge/sponsor-GitHub%20Sponsors-ec6cb9)](https://github.com/sponsors/philiprehberger)
 
 In-memory feature flag evaluation with rollout, environment, targeting, and A/B variant support for Rust
 
