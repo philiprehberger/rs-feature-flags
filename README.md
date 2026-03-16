@@ -1,5 +1,9 @@
 # rs-feature-flags
 
+[![CI](https://github.com/philiprehberger/rs-feature-flags/actions/workflows/ci.yml/badge.svg)](https://github.com/philiprehberger/rs-feature-flags/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/philiprehberger-feature-flags.svg)](https://crates.io/crates/philiprehberger-feature-flags)
+[![License](https://img.shields.io/github/license/philiprehberger/rs-feature-flags)](LICENSE)
+
 In-memory feature flag evaluation with rollout and environment support for Rust.
 
 ## Installation
