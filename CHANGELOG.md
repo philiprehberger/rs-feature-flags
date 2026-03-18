@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0
+## 0.2.0 (2026-03-17)
 
 - Add user targeting (`allowed_users`) and role targeting (`allowed_roles`) to `FlagConfig`
 - Add attribute-based evaluation with `required_attributes` on `FlagConfig`

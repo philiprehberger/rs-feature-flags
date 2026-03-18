@@ -4,11 +4,9 @@
 [![Crates.io](https://img.shields.io/crates/v/philiprehberger-feature-flags.svg)](https://crates.io/crates/philiprehberger-feature-flags)
 [![License](https://img.shields.io/github/license/philiprehberger/rs-feature-flags)](LICENSE)
 
-In-memory feature flag evaluation with rollout, environment, targeting, and A/B variant support for Rust.
+In-memory feature flag evaluation with rollout, environment, targeting, and A/B variant support for Rust
 
 ## Installation
-
-Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
