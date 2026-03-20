@@ -1,3 +1,15 @@
+//! In-memory feature flag evaluation with rollout, environment, targeting, and A/B variant support.
+//!
+//! # Example
+//!
+//! ```rust
+//! use philiprehberger_feature_flags::{FlagStore, Flag, Rollout};
+//!
+//! let mut store = FlagStore::new();
+//! store.add(Flag::new("dark_mode").enabled(true));
+//! assert!(store.is_enabled("dark_mode", None));
+//! ```
+
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;

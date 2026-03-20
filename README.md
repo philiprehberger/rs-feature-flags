@@ -10,7 +10,7 @@ In-memory feature flag evaluation with rollout, environment, targeting, and A/B 
 
 ```toml
 [dependencies]
-philiprehberger-feature-flags = "0.2.0"
+philiprehberger-feature-flags = "0.2.1"
 ```
 
 To enable JSON deserialization via serde:
@@ -47,7 +47,7 @@ let enabled = flags.is_enabled_for("beta-feature", &ctx);
 println!("beta-feature enabled: {enabled}");
 ```
 
-## Targeting
+### Targeting
 
 Grant access to specific users or roles, bypassing percentage rollout:
 
@@ -91,7 +91,7 @@ let ctx = Context::new().with_attribute("plan", "enterprise");
 assert!(flags.is_enabled_for("enterprise-only", &ctx));
 ```
 
-## Variants
+### Variants
 
 Deterministic A/B test variant assignment based on user ID hashing:
 

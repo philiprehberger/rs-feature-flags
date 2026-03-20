@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Add crate-level documentation with usage examples
+
 ## 0.2.0 (2026-03-17)
 
 - Add user targeting (`allowed_users`) and role targeting (`allowed_roles`) to `FlagConfig`
