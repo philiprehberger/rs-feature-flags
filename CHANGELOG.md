@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.1
+## 0.2.1 (2026-03-17)
 
 - Add crate-level documentation with usage examples
 
