@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2 (2026-03-22)
+
+- Fix CHANGELOG compliance
+
 ## 0.2.1 (2026-03-17)
 
 - Add crate-level documentation with usage examples
@@ -13,10 +17,11 @@
 - Add `with_role()` convenience builder on `Context`
 - Evaluation order: environment -> required attributes -> allowed users -> allowed roles -> rollout -> enabled
 
-## 0.1.5
+## 0.1.5 (2026-03-17)
 
 - Add readme, rust-version, documentation to Cargo.toml
 - Add Development section to README
+
 ## 0.1.4 (2026-03-16)
 
 - Update install snippet to use full version

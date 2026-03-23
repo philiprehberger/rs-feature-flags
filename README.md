@@ -10,7 +10,7 @@ In-memory feature flag evaluation with rollout, environment, targeting, and A/B 
 
 ```toml
 [dependencies]
-philiprehberger-feature-flags = "0.2.1"
+philiprehberger-feature-flags = "0.2.2"
 ```
 
 To enable JSON deserialization via serde:
