@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0 (2026-06-14)
+
+- Add `FlagConfig::disallowed_users` denylist and `with_disallowed_users()` builder — takes precedence over `allowed_users`, `allowed_roles`, and rollout
+- Fix stale install version in README install snippet
+
 ## 0.2.5 (2026-03-31)
 
 - Standardize README to 3-badge format with emoji Support section

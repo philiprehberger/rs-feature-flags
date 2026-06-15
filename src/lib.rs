@@ -30,6 +30,10 @@ pub struct FlagConfig {
     /// Users that are always granted access regardless of rollout or other rules.
     #[cfg_attr(feature = "serde", serde(default))]
     pub allowed_users: Vec<String>,
+    /// Users that are always denied access. Takes precedence over `allowed_users`,
+    /// `allowed_roles`, and `rollout_percentage`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub disallowed_users: Vec<String>,
     /// Roles that are always granted access. Checked against the `role` context attribute.
     #[cfg_attr(feature = "serde", serde(default))]
     pub allowed_roles: Vec<String>,
@@ -49,6 +53,7 @@ impl FlagConfig {
             rollout_percentage: None,
             environments: None,
             allowed_users: Vec::new(),
+            disallowed_users: Vec::new(),
             allowed_roles: Vec::new(),
             variants: Vec::new(),
             required_attributes: HashMap::new(),
@@ -70,6 +75,13 @@ impl FlagConfig {
     /// Set the list of users that bypass all other evaluation rules.
     pub fn with_allowed_users(mut self, users: Vec<String>) -> Self {
         self.allowed_users = users;
+        self
+    }
+
+    /// Set the list of users that are always denied. Takes precedence over
+    /// `allowed_users`, `allowed_roles`, and rollout.
+    pub fn with_disallowed_users(mut self, users: Vec<String>) -> Self {
+        self.disallowed_users = users;
         self
     }
 
@@ -169,10 +181,11 @@ impl FeatureFlags {
     /// Evaluation order:
     /// 1. Environment filtering
     /// 2. Required attribute matching
-    /// 3. Allowed users (immediate pass)
-    /// 4. Allowed roles (immediate pass)
-    /// 5. Percentage rollout
-    /// 6. Fall back to `enabled`
+    /// 3. Disallowed users (immediate deny)
+    /// 4. Allowed users (immediate pass)
+    /// 5. Allowed roles (immediate pass)
+    /// 6. Percentage rollout
+    /// 7. Fall back to `enabled`
     ///
     /// Returns false if the flag does not exist.
     pub fn is_enabled_for(&self, name: &str, context: &Context) -> bool {
@@ -249,6 +262,15 @@ fn evaluate_flag(flag: &FlagConfig, name: &str, context: &Context) -> bool {
         match context.attributes.get(key) {
             Some(ctx_val) if ctx_val == value => {}
             _ => return false,
+        }
+    }
+
+    // Disallowed users — immediate deny (takes precedence over allow lists and rollout)
+    if !flag.disallowed_users.is_empty() {
+        if let Some(ref uid) = context.user_id {
+            if flag.disallowed_users.contains(uid) {
+                return false;
+            }
         }
     }
 
@@ -445,6 +467,70 @@ mod tests {
         );
         let ctx = Context::new().with_user_id("regular-user");
         assert!(!flags.is_enabled_for("feature-a", &ctx));
+    }
+
+    // --- Disallowed users ---
+
+    #[test]
+    fn disallowed_user_is_denied() {
+        let mut flags = FeatureFlags::new();
+        flags.set(
+            "feature-a",
+            FlagConfig::new(true)
+                .with_disallowed_users(vec!["banned-user".into()]),
+        );
+        let ctx = Context::new().with_user_id("banned-user");
+        assert!(!flags.is_enabled_for("feature-a", &ctx));
+    }
+
+    #[test]
+    fn disallowed_takes_precedence_over_allowed() {
+        let mut flags = FeatureFlags::new();
+        flags.set(
+            "feature-a",
+            FlagConfig::new(true)
+                .with_allowed_users(vec!["alice".into()])
+                .with_disallowed_users(vec!["alice".into()]),
+        );
+        let ctx = Context::new().with_user_id("alice");
+        assert!(!flags.is_enabled_for("feature-a", &ctx));
+    }
+
+    #[test]
+    fn disallowed_takes_precedence_over_role() {
+        let mut flags = FeatureFlags::new();
+        flags.set(
+            "admin-feature",
+            FlagConfig::new(true)
+                .with_allowed_roles(vec!["admin".into()])
+                .with_disallowed_users(vec!["alice".into()]),
+        );
+        let ctx = Context::new().with_user_id("alice").with_role("admin");
+        assert!(!flags.is_enabled_for("admin-feature", &ctx));
+    }
+
+    #[test]
+    fn disallowed_takes_precedence_over_rollout() {
+        let mut flags = FeatureFlags::new();
+        flags.set(
+            "feature-a",
+            FlagConfig::new(true)
+                .with_rollout(100)
+                .with_disallowed_users(vec!["banned".into()]),
+        );
+        let ctx = Context::new().with_user_id("banned");
+        assert!(!flags.is_enabled_for("feature-a", &ctx));
+    }
+
+    #[test]
+    fn other_users_unaffected_by_denylist() {
+        let mut flags = FeatureFlags::new();
+        flags.set(
+            "feature-a",
+            FlagConfig::new(true).with_disallowed_users(vec!["banned".into()]),
+        );
+        let ctx = Context::new().with_user_id("alice");
+        assert!(flags.is_enabled_for("feature-a", &ctx));
     }
 
     // --- Allowed roles ---

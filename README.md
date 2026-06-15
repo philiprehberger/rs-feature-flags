@@ -4,20 +4,22 @@
 [![Crates.io](https://img.shields.io/crates/v/philiprehberger-feature-flags.svg)](https://crates.io/crates/philiprehberger-feature-flags)
 [![Last updated](https://img.shields.io/github/last-commit/philiprehberger/rs-feature-flags)](https://github.com/philiprehberger/rs-feature-flags/commits/main)
 
+![rs-feature-flags](https://raw.githubusercontent.com/philiprehberger/rs-feature-flags/main/package-card.webp)
+
 In-memory feature flag evaluation with rollout, environment, targeting, and A/B variant support for Rust
 
 ## Installation
 
 ```toml
 [dependencies]
-philiprehberger-feature-flags = "0.2.4"
+philiprehberger-feature-flags = "0.3.0"
 ```
 
 To enable JSON deserialization via serde:
 
 ```toml
 [dependencies]
-philiprehberger-feature-flags = { version = "0.2.4", features = ["serde"] }
+philiprehberger-feature-flags = { version = "0.3.0", features = ["serde"] }
 ```
 
 ## Usage
@@ -72,6 +74,24 @@ let ctx = Context::new().with_user_id("charlie").with_role("admin");
 assert!(flags.is_enabled_for("internal-tool", &ctx));
 ```
 
+Or use a denylist that takes precedence over allow lists and rollout:
+
+```rust
+use philiprehberger_feature_flags::{FeatureFlags, FlagConfig, Context};
+
+let mut flags = FeatureFlags::new();
+flags.set(
+    "feature-a",
+    FlagConfig::new(true)
+        .with_rollout(100)
+        .with_disallowed_users(vec!["banned-user".into()]),
+);
+
+// Banned user is denied even at 100% rollout
+let ctx = Context::new().with_user_id("banned-user");
+assert!(!flags.is_enabled_for("feature-a", &ctx));
+```
+
 You can also require context attributes to match:
 
 ```rust
@@ -113,6 +133,7 @@ println!("assigned: {}", variant.unwrap());
 | `.with_rollout(pct)` | Set rollout percentage (0-100) |
 | `.with_environments(envs)` | Restrict flag to specific environments |
 | `.with_allowed_users(users)` | Set users that bypass rollout |
+| `.with_disallowed_users(users)` | Set users that are always denied (precedence over allow lists and rollout) |
 | `.with_allowed_roles(roles)` | Set roles that bypass rollout (matched against `role` attribute) |
 | `.with_variants(variants)` | Set variant names for A/B testing |
 | `.with_required_attributes(attrs)` | Set required context attributes |
