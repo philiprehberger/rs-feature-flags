@@ -12,14 +12,14 @@ In-memory feature flag evaluation with rollout, environment, targeting, and A/B 
 
 ```toml
 [dependencies]
-philiprehberger-feature-flags = "0.3.0"
+philiprehberger-feature-flags = "0.4.0"
 ```
 
 To enable JSON deserialization via serde:
 
 ```toml
 [dependencies]
-philiprehberger-feature-flags = { version = "0.3.0", features = ["serde"] }
+philiprehberger-feature-flags = { version = "0.4.0", features = ["serde"] }
 ```
 
 ## Usage
@@ -113,7 +113,8 @@ assert!(flags.is_enabled_for("enterprise-only", &ctx));
 
 ### Variants
 
-Deterministic A/B test variant assignment based on user ID hashing:
+Deterministic A/B test variant assignment based on user ID hashing. Pass the
+variant list explicitly:
 
 ```rust
 use philiprehberger_feature_flags::FeatureFlags;
@@ -121,6 +122,23 @@ use philiprehberger_feature_flags::FeatureFlags;
 let flags = FeatureFlags::new();
 let variant = flags.get_variant("experiment", "user-42", &["control", "variant-a", "variant-b"]);
 // Always returns the same variant for the same flag + user pair
+println!("assigned: {}", variant.unwrap());
+```
+
+Or configure the variants on the flag and resolve them from a `Context`:
+
+```rust
+use philiprehberger_feature_flags::{FeatureFlags, FlagConfig, Context};
+
+let mut flags = FeatureFlags::new();
+flags.set(
+    "experiment",
+    FlagConfig::new(true)
+        .with_variants(vec!["control".into(), "variant-a".into(), "variant-b".into()]),
+);
+
+let ctx = Context::new().with_user_id("user-42");
+let variant = flags.variant_for("experiment", &ctx);
 println!("assigned: {}", variant.unwrap());
 ```
 
@@ -151,9 +169,17 @@ println!("assigned: {}", variant.unwrap());
 | `.is_enabled(name)` | Check if a flag is enabled (no context) |
 | `.is_enabled_for(name, ctx)` | Evaluate a flag with full context |
 | `.evaluate_with_config(name, ctx)` | Evaluate a stored flag with context |
-| `.get_variant(flag, user_id, variants)` | Get a deterministic A/B variant |
+| `.get_variant(flag, user_id, variants)` | Get a deterministic A/B variant from an explicit list |
+| `.variant_for(flag, ctx)` | Get a deterministic A/B variant from the flag's stored variants |
+| `.get(name)` | Get a reference to a flag's `FlagConfig` |
+| `.contains(name)` | Check whether a flag exists |
+| `.set_enabled(name, enabled)` | Toggle a flag's `enabled` state in place |
+| `.len()` | Number of flags in the store |
+| `.is_empty()` | True if the store has no flags |
+| `.clear()` | Remove all flags |
 | `.all_flags()` | Get a sorted list of all flag names |
 | `FeatureFlags::from_json(json)` | Parse flags from JSON (requires `serde` feature) |
+| `.to_json()` | Serialize all flags to JSON (requires `serde` feature) |
 
 ## Development
 

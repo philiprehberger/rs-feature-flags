@@ -15,14 +15,14 @@ use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
 
 #[cfg(feature = "serde")]
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Configuration for a single feature flag.
 ///
 /// Supports environment filtering, percentage rollout, user/role targeting,
 /// required context attributes, and A/B test variants.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FlagConfig {
     pub enabled: bool,
     pub rollout_percentage: Option<u8>,
@@ -197,9 +197,10 @@ impl FeatureFlags {
         evaluate_flag(flag, name, context)
     }
 
-    /// Evaluate a flag using a standalone [`FlagConfig`] (not stored in the flag store).
+    /// Evaluate the stored flag `name` against `ctx`.
     ///
-    /// Uses the same evaluation logic as [`is_enabled_for`](Self::is_enabled_for).
+    /// Uses the same evaluation logic as [`is_enabled_for`](Self::is_enabled_for);
+    /// retained as a named alias. Returns `false` if the flag does not exist.
     pub fn evaluate_with_config(&self, name: &str, ctx: &Context) -> bool {
         match self.flags.get(name) {
             Some(flag) => evaluate_flag(flag, name, ctx),
@@ -210,17 +211,52 @@ impl FeatureFlags {
     /// Returns a deterministic variant for a user based on hashing.
     ///
     /// The variant is chosen by hashing `"{flag_name}:{user_id}"` and taking the
-    /// result modulo the number of variants. Returns `None` if the flag does not
-    /// exist, has no variants configured, or the context has no user ID.
+    /// result modulo the number of variants. The variant list is supplied by the
+    /// caller. Returns `None` if `variants` is empty.
+    ///
+    /// To use the variants stored on a flag's [`FlagConfig`] instead, see
+    /// [`variant_for`](Self::variant_for).
     pub fn get_variant(&self, flag_name: &str, user_id: &str, variants: &[&str]) -> Option<String> {
         if variants.is_empty() {
             return None;
         }
-        let key = format!("{flag_name}:{user_id}");
-        let mut hasher = DefaultHasher::new();
-        key.hash(&mut hasher);
-        let idx = (hasher.finish() as usize) % variants.len();
+        let idx = variant_index(flag_name, user_id, variants.len());
         Some(variants[idx].to_owned())
+    }
+
+    /// Returns a deterministic variant for a user using the flag's *stored* variants.
+    ///
+    /// Unlike [`get_variant`](Self::get_variant), this reads the variant list
+    /// configured on the flag via [`FlagConfig::with_variants`] and takes the
+    /// user ID from `context`. The same flag + user pair always resolves to the
+    /// same variant.
+    ///
+    /// Returns `None` if the flag does not exist, has no variants configured, or
+    /// the context has no user ID.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use philiprehberger_feature_flags::{FeatureFlags, FlagConfig, Context};
+    ///
+    /// let mut flags = FeatureFlags::new();
+    /// flags.set(
+    ///     "checkout-experiment",
+    ///     FlagConfig::new(true)
+    ///         .with_variants(vec!["control".into(), "variant-a".into()]),
+    /// );
+    /// let ctx = Context::new().with_user_id("user-42");
+    /// let variant = flags.variant_for("checkout-experiment", &ctx);
+    /// assert!(variant.is_some());
+    /// ```
+    pub fn variant_for(&self, flag_name: &str, context: &Context) -> Option<String> {
+        let flag = self.flags.get(flag_name)?;
+        if flag.variants.is_empty() {
+            return None;
+        }
+        let user_id = context.user_id.as_deref()?;
+        let idx = variant_index(flag_name, user_id, flag.variants.len());
+        Some(flag.variants[idx].clone())
     }
 
     /// Get a sorted list of all flag names.
@@ -230,12 +266,62 @@ impl FeatureFlags {
         names
     }
 
+    /// Get a reference to a flag's configuration by name.
+    ///
+    /// Returns `None` if the flag does not exist.
+    pub fn get(&self, name: &str) -> Option<&FlagConfig> {
+        self.flags.get(name)
+    }
+
+    /// Check whether a flag exists in the store.
+    pub fn contains(&self, name: &str) -> bool {
+        self.flags.contains_key(name)
+    }
+
+    /// Toggle the `enabled` state of an existing flag in place.
+    ///
+    /// This flips only the base `enabled` flag; rollout, targeting, and other
+    /// rules are left untouched. Returns `true` if the flag existed and was
+    /// updated, `false` if no flag with that name is present.
+    pub fn set_enabled(&mut self, name: &str, enabled: bool) -> bool {
+        match self.flags.get_mut(name) {
+            Some(flag) => {
+                flag.enabled = enabled;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Return the number of flags in the store.
+    pub fn len(&self) -> usize {
+        self.flags.len()
+    }
+
+    /// Return `true` if the store contains no flags.
+    pub fn is_empty(&self) -> bool {
+        self.flags.is_empty()
+    }
+
+    /// Remove all flags from the store.
+    pub fn clear(&mut self) {
+        self.flags.clear();
+    }
+
     /// Parse flags from a JSON string.
     #[cfg(feature = "serde")]
     pub fn from_json(json: &str) -> Result<Self, String> {
         let flags: HashMap<String, FlagConfig> =
             serde_json::from_str(json).map_err(|e| e.to_string())?;
         Ok(Self { flags })
+    }
+
+    /// Serialize all flags to a JSON string.
+    ///
+    /// The output round-trips through [`from_json`](Self::from_json).
+    #[cfg(feature = "serde")]
+    pub fn to_json(&self) -> Result<String, String> {
+        serde_json::to_string(&self.flags).map_err(|e| e.to_string())
     }
 }
 
@@ -313,6 +399,14 @@ fn rollout_hash(user_id: &str, flag_name: &str) -> u8 {
     user_id.hash(&mut hasher);
     flag_name.hash(&mut hasher);
     (hasher.finish() % 100) as u8
+}
+
+/// Deterministically map a flag + user pair onto a variant index in `0..len`.
+fn variant_index(flag_name: &str, user_id: &str, len: usize) -> usize {
+    let key = format!("{flag_name}:{user_id}");
+    let mut hasher = DefaultHasher::new();
+    key.hash(&mut hasher);
+    (hasher.finish() as usize) % len
 }
 
 #[cfg(test)]
@@ -692,5 +786,118 @@ mod tests {
     fn context_with_role_builder() {
         let ctx = Context::new().with_role("editor");
         assert_eq!(ctx.attributes.get("role").map(|s| s.as_str()), Some("editor"));
+    }
+
+    // --- variant_for (stored variants) ---
+
+    #[test]
+    fn variant_for_uses_stored_variants() {
+        let mut flags = FeatureFlags::new();
+        flags.set(
+            "experiment",
+            FlagConfig::new(true)
+                .with_variants(vec!["control".into(), "variant-a".into(), "variant-b".into()]),
+        );
+        let ctx = Context::new().with_user_id("user-42");
+        let v1 = flags.variant_for("experiment", &ctx);
+        let v2 = flags.variant_for("experiment", &ctx);
+        assert_eq!(v1, v2);
+        assert!(["control", "variant-a", "variant-b"].contains(&v1.unwrap().as_str()));
+    }
+
+    #[test]
+    fn variant_for_agrees_with_get_variant() {
+        let mut flags = FeatureFlags::new();
+        flags.set(
+            "experiment",
+            FlagConfig::new(true).with_variants(vec!["control".into(), "variant-a".into()]),
+        );
+        let ctx = Context::new().with_user_id("user-42");
+        let stored = flags.variant_for("experiment", &ctx);
+        let explicit = flags.get_variant("experiment", "user-42", &["control", "variant-a"]);
+        assert_eq!(stored, explicit);
+    }
+
+    #[test]
+    fn variant_for_none_when_missing_or_unconfigured() {
+        let mut flags = FeatureFlags::new();
+        flags.set("no-variants", FlagConfig::new(true));
+        let ctx = Context::new().with_user_id("user-42");
+        assert!(flags.variant_for("no-variants", &ctx).is_none());
+        assert!(flags.variant_for("missing", &ctx).is_none());
+    }
+
+    #[test]
+    fn variant_for_none_without_user_id() {
+        let mut flags = FeatureFlags::new();
+        flags.set(
+            "experiment",
+            FlagConfig::new(true).with_variants(vec!["control".into()]),
+        );
+        assert!(flags.variant_for("experiment", &Context::new()).is_none());
+    }
+
+    // --- introspection / mutation ---
+
+    #[test]
+    fn get_and_contains() {
+        let mut flags = FeatureFlags::new();
+        flags.set("feature-a", FlagConfig::new(true).with_rollout(25));
+        assert!(flags.contains("feature-a"));
+        assert!(!flags.contains("missing"));
+        assert_eq!(flags.get("feature-a").unwrap().rollout_percentage, Some(25));
+        assert!(flags.get("missing").is_none());
+    }
+
+    #[test]
+    fn set_enabled_toggles_in_place() {
+        let mut flags = FeatureFlags::new();
+        flags.set("feature-a", FlagConfig::new(true).with_rollout(25));
+        assert!(flags.set_enabled("feature-a", false));
+        assert!(!flags.is_enabled("feature-a"));
+        // Other config is preserved.
+        assert_eq!(flags.get("feature-a").unwrap().rollout_percentage, Some(25));
+        // Missing flag reports false.
+        assert!(!flags.set_enabled("missing", true));
+    }
+
+    #[test]
+    fn len_is_empty_and_clear() {
+        let mut flags = FeatureFlags::new();
+        assert!(flags.is_empty());
+        assert_eq!(flags.len(), 0);
+        flags.set("a", FlagConfig::new(true));
+        flags.set("b", FlagConfig::new(false));
+        assert_eq!(flags.len(), 2);
+        assert!(!flags.is_empty());
+        flags.clear();
+        assert!(flags.is_empty());
+    }
+
+    // --- serde round-trip ---
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn to_json_round_trips() {
+        let mut flags = FeatureFlags::new();
+        flags.set(
+            "beta",
+            FlagConfig::new(true)
+                .with_rollout(50)
+                .with_environments(vec!["prod".into()])
+                .with_variants(vec!["control".into(), "variant-a".into()]),
+        );
+        let json = flags.to_json().unwrap();
+        let restored = FeatureFlags::from_json(&json).unwrap();
+        assert_eq!(restored.get("beta").unwrap().rollout_percentage, Some(50));
+        assert_eq!(
+            restored.get("beta").unwrap().variants,
+            vec!["control".to_owned(), "variant-a".to_owned()]
+        );
+        let ctx = Context::new().with_user_id("u").with_environment("prod");
+        assert_eq!(
+            flags.variant_for("beta", &ctx),
+            restored.variant_for("beta", &ctx)
+        );
     }
 }

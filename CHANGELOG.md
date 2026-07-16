@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 (2026-07-15)
+
+- Add `FeatureFlags::variant_for()` to resolve an A/B variant from a flag's stored `variants` (set via `with_variants`) using the user ID from a `Context`, closing the gap where configured variants were previously unused by evaluation
+- Add store introspection and mutation: `get()`, `contains()`, `set_enabled()`, `len()`, `is_empty()`, and `clear()`
+- Add `FeatureFlags::to_json()` and derive `Serialize` on `FlagConfig` for round-tripping flags to JSON (requires `serde` feature)
+
 ## 0.3.0 (2026-06-14)
 
 - Add `FlagConfig::disallowed_users` denylist and `with_disallowed_users()` builder — takes precedence over `allowed_users`, `allowed_roles`, and rollout
