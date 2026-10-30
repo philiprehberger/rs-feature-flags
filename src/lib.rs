@@ -10,7 +10,7 @@
 //! assert!(flags.is_enabled("dark_mode"));
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
 
@@ -143,6 +143,60 @@ impl Context {
     }
 }
 
+/// The outcome of evaluating a flag, as returned by [`FeatureFlags::explain`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Evaluation {
+    /// Whether the flag is enabled for the evaluated context.
+    pub enabled: bool,
+    /// The rule that decided the outcome.
+    pub reason: Reason,
+}
+
+impl Evaluation {
+    fn allow(reason: Reason) -> Self {
+        Self { enabled: true, reason }
+    }
+
+    fn deny(reason: Reason) -> Self {
+        Self { enabled: false, reason }
+    }
+}
+
+/// Why a flag evaluated to enabled or disabled.
+///
+/// Variants are listed in evaluation order; the first rule that decides the
+/// outcome is reported. New variants may be added in minor releases.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Reason {
+    /// No flag with that name exists in the store (disabled).
+    NotFound,
+    /// The flag's base `enabled` state is `false` (disabled).
+    Disabled,
+    /// The flag is restricted to environments and the context's environment is not one of them (disabled).
+    EnvironmentMismatch,
+    /// The flag is restricted to environments and the context has no environment (disabled).
+    MissingEnvironment,
+    /// A required attribute is missing from the context or has a different value (disabled).
+    AttributeMismatch,
+    /// The context's user is on the flag's denylist (disabled).
+    DisallowedUser,
+    /// The context's user is on the flag's allow list (enabled).
+    AllowedUser,
+    /// The context's `role` attribute is one of the flag's allowed roles (enabled).
+    AllowedRole,
+    /// The user's rollout bucket falls inside the rollout percentage (enabled).
+    InRollout,
+    /// The user's rollout bucket falls outside the rollout percentage (disabled).
+    OutOfRollout,
+    /// The flag has a rollout percentage and the context has no user ID (disabled).
+    MissingUserId,
+    /// The flag is enabled and no rule restricted it (enabled).
+    Enabled,
+}
+
 /// In-memory feature flag store.
 #[derive(Debug, Clone, Default)]
 pub struct FeatureFlags {
@@ -189,12 +243,7 @@ impl FeatureFlags {
     ///
     /// Returns false if the flag does not exist.
     pub fn is_enabled_for(&self, name: &str, context: &Context) -> bool {
-        let flag = match self.flags.get(name) {
-            Some(f) => f,
-            None => return false,
-        };
-
-        evaluate_flag(flag, name, context)
+        self.explain(name, context).enabled
     }
 
     /// Evaluate the stored flag `name` against `ctx`.
@@ -202,10 +251,82 @@ impl FeatureFlags {
     /// Uses the same evaluation logic as [`is_enabled_for`](Self::is_enabled_for);
     /// retained as a named alias. Returns `false` if the flag does not exist.
     pub fn evaluate_with_config(&self, name: &str, ctx: &Context) -> bool {
+        self.explain(name, ctx).enabled
+    }
+
+    /// Evaluate a flag with full context and report *why* it resolved the way it did.
+    ///
+    /// This is the single evaluation path: [`is_enabled_for`](Self::is_enabled_for)
+    /// and [`evaluate_with_config`](Self::evaluate_with_config) return
+    /// `self.explain(name, ctx).enabled`, so the decision here always matches.
+    /// The [`Reason`] names the rule that decided the outcome, following the
+    /// evaluation order documented on [`is_enabled_for`](Self::is_enabled_for).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use philiprehberger_feature_flags::{Context, FeatureFlags, FlagConfig, Reason};
+    ///
+    /// let mut flags = FeatureFlags::new();
+    /// flags.set(
+    ///     "beta",
+    ///     FlagConfig::new(true)
+    ///         .with_rollout(0)
+    ///         .with_allowed_users(vec!["alice".into()]),
+    /// );
+    ///
+    /// let alice = flags.explain("beta", &Context::new().with_user_id("alice"));
+    /// assert!(alice.enabled);
+    /// assert_eq!(alice.reason, Reason::AllowedUser);
+    ///
+    /// let bob = flags.explain("beta", &Context::new().with_user_id("bob"));
+    /// assert!(!bob.enabled);
+    /// assert_eq!(bob.reason, Reason::OutOfRollout);
+    ///
+    /// let missing = flags.explain("nope", &Context::new());
+    /// assert_eq!(missing.reason, Reason::NotFound);
+    /// ```
+    pub fn explain(&self, name: &str, ctx: &Context) -> Evaluation {
         match self.flags.get(name) {
             Some(flag) => evaluate_flag(flag, name, ctx),
-            None => false,
+            None => Evaluation::deny(Reason::NotFound),
         }
+    }
+
+    /// Evaluate every stored flag against one context.
+    ///
+    /// Returns a map of flag name to its result, sorted by name, using the same
+    /// logic as [`is_enabled_for`](Self::is_enabled_for). Useful for shipping a
+    /// complete flag snapshot to a frontend or logging it with a request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use philiprehberger_feature_flags::{Context, FeatureFlags, FlagConfig};
+    ///
+    /// let mut flags = FeatureFlags::new();
+    /// flags.set("dark-mode", FlagConfig::new(true));
+    /// flags.set("legacy-ui", FlagConfig::new(false));
+    /// flags.set(
+    ///     "prod-only",
+    ///     FlagConfig::new(true).with_environments(vec!["production".into()]),
+    /// );
+    ///
+    /// let ctx = Context::new().with_environment("staging");
+    /// let all = flags.evaluate_all(&ctx);
+    /// assert_eq!(all.get("dark-mode"), Some(&true));
+    /// assert_eq!(all.get("legacy-ui"), Some(&false));
+    /// assert_eq!(all.get("prod-only"), Some(&false));
+    /// assert_eq!(
+    ///     all.keys().collect::<Vec<_>>(),
+    ///     vec!["dark-mode", "legacy-ui", "prod-only"]
+    /// );
+    /// ```
+    pub fn evaluate_all(&self, ctx: &Context) -> BTreeMap<String, bool> {
+        self.flags
+            .iter()
+            .map(|(name, flag)| (name.clone(), evaluate_flag(flag, name, ctx).enabled))
+            .collect()
     }
 
     /// Returns a deterministic variant for a user based on hashing.
@@ -326,9 +447,13 @@ impl FeatureFlags {
 }
 
 /// Shared evaluation logic for a single flag.
-fn evaluate_flag(flag: &FlagConfig, name: &str, context: &Context) -> bool {
+///
+/// This is the single decision path behind [`FeatureFlags::explain`],
+/// [`FeatureFlags::is_enabled_for`], [`FeatureFlags::evaluate_with_config`],
+/// and [`FeatureFlags::evaluate_all`], so their results can never diverge.
+fn evaluate_flag(flag: &FlagConfig, name: &str, context: &Context) -> Evaluation {
     if !flag.enabled {
-        return false;
+        return Evaluation::deny(Reason::Disabled);
     }
 
     // Environment check
@@ -336,10 +461,10 @@ fn evaluate_flag(flag: &FlagConfig, name: &str, context: &Context) -> bool {
         match context.environment {
             Some(ref ctx_env) => {
                 if !envs.contains(ctx_env) {
-                    return false;
+                    return Evaluation::deny(Reason::EnvironmentMismatch);
                 }
             }
-            None => return false,
+            None => return Evaluation::deny(Reason::MissingEnvironment),
         }
     }
 
@@ -347,7 +472,7 @@ fn evaluate_flag(flag: &FlagConfig, name: &str, context: &Context) -> bool {
     for (key, value) in &flag.required_attributes {
         match context.attributes.get(key) {
             Some(ctx_val) if ctx_val == value => {}
-            _ => return false,
+            _ => return Evaluation::deny(Reason::AttributeMismatch),
         }
     }
 
@@ -355,7 +480,7 @@ fn evaluate_flag(flag: &FlagConfig, name: &str, context: &Context) -> bool {
     if !flag.disallowed_users.is_empty() {
         if let Some(ref uid) = context.user_id {
             if flag.disallowed_users.contains(uid) {
-                return false;
+                return Evaluation::deny(Reason::DisallowedUser);
             }
         }
     }
@@ -364,7 +489,7 @@ fn evaluate_flag(flag: &FlagConfig, name: &str, context: &Context) -> bool {
     if !flag.allowed_users.is_empty() {
         if let Some(ref uid) = context.user_id {
             if flag.allowed_users.contains(uid) {
-                return true;
+                return Evaluation::allow(Reason::AllowedUser);
             }
         }
     }
@@ -373,25 +498,27 @@ fn evaluate_flag(flag: &FlagConfig, name: &str, context: &Context) -> bool {
     if !flag.allowed_roles.is_empty() {
         if let Some(role) = context.attributes.get("role") {
             if flag.allowed_roles.contains(role) {
-                return true;
+                return Evaluation::allow(Reason::AllowedRole);
             }
         }
     }
 
     // Rollout check
     if let Some(pct) = flag.rollout_percentage {
-        match context.user_id {
+        return match context.user_id {
             Some(ref uid) => {
                 let hash = rollout_hash(uid, name);
                 if hash >= pct {
-                    return false;
+                    Evaluation::deny(Reason::OutOfRollout)
+                } else {
+                    Evaluation::allow(Reason::InRollout)
                 }
             }
-            None => return false,
-        }
+            None => Evaluation::deny(Reason::MissingUserId),
+        };
     }
 
-    true
+    Evaluation::allow(Reason::Enabled)
 }
 
 fn rollout_hash(user_id: &str, flag_name: &str) -> u8 {
@@ -899,5 +1026,209 @@ mod tests {
             flags.variant_for("beta", &ctx),
             restored.variant_for("beta", &ctx)
         );
+    }
+
+    // --- explain ---
+
+    fn explain_reason(flags: &FeatureFlags, name: &str, ctx: &Context) -> (bool, Reason) {
+        let e = flags.explain(name, ctx);
+        (e.enabled, e.reason)
+    }
+
+    #[test]
+    fn explain_not_found_and_disabled() {
+        let mut flags = FeatureFlags::new();
+        flags.set("off", FlagConfig::new(false).with_allowed_users(vec!["alice".into()]));
+        let ctx = Context::new().with_user_id("alice");
+        assert_eq!(explain_reason(&flags, "missing", &ctx), (false, Reason::NotFound));
+        assert_eq!(explain_reason(&flags, "off", &ctx), (false, Reason::Disabled));
+    }
+
+    #[test]
+    fn explain_environment_reasons() {
+        let mut flags = FeatureFlags::new();
+        flags.set("f", FlagConfig::new(true).with_environments(vec!["prod".into()]));
+        assert_eq!(
+            explain_reason(&flags, "f", &Context::new().with_environment("staging")),
+            (false, Reason::EnvironmentMismatch)
+        );
+        assert_eq!(
+            explain_reason(&flags, "f", &Context::new()),
+            (false, Reason::MissingEnvironment)
+        );
+        assert_eq!(
+            explain_reason(&flags, "f", &Context::new().with_environment("prod")),
+            (true, Reason::Enabled)
+        );
+    }
+
+    #[test]
+    fn explain_attribute_mismatch() {
+        let mut attrs = HashMap::new();
+        attrs.insert("plan".to_owned(), "enterprise".to_owned());
+        let mut flags = FeatureFlags::new();
+        flags.set("f", FlagConfig::new(true).with_required_attributes(attrs));
+        assert_eq!(
+            explain_reason(&flags, "f", &Context::new().with_attribute("plan", "free")),
+            (false, Reason::AttributeMismatch)
+        );
+        assert_eq!(
+            explain_reason(&flags, "f", &Context::new()),
+            (false, Reason::AttributeMismatch)
+        );
+    }
+
+    #[test]
+    fn explain_targeting_reasons() {
+        let mut flags = FeatureFlags::new();
+        flags.set(
+            "f",
+            FlagConfig::new(true)
+                .with_rollout(0)
+                .with_allowed_users(vec!["alice".into(), "mallory".into()])
+                .with_disallowed_users(vec!["mallory".into()])
+                .with_allowed_roles(vec!["admin".into()]),
+        );
+        assert_eq!(
+            explain_reason(&flags, "f", &Context::new().with_user_id("mallory").with_role("admin")),
+            (false, Reason::DisallowedUser)
+        );
+        assert_eq!(
+            explain_reason(&flags, "f", &Context::new().with_user_id("alice")),
+            (true, Reason::AllowedUser)
+        );
+        assert_eq!(
+            explain_reason(&flags, "f", &Context::new().with_user_id("bob").with_role("admin")),
+            (true, Reason::AllowedRole)
+        );
+        assert_eq!(
+            explain_reason(&flags, "f", &Context::new().with_user_id("bob")),
+            (false, Reason::OutOfRollout)
+        );
+    }
+
+    #[test]
+    fn explain_rollout_reasons() {
+        let mut flags = FeatureFlags::new();
+        flags.set("all", FlagConfig::new(true).with_rollout(100));
+        flags.set("none", FlagConfig::new(true).with_rollout(0));
+        let ctx = Context::new().with_user_id("user-1");
+        assert_eq!(explain_reason(&flags, "all", &ctx), (true, Reason::InRollout));
+        assert_eq!(explain_reason(&flags, "none", &ctx), (false, Reason::OutOfRollout));
+        assert_eq!(
+            explain_reason(&flags, "all", &Context::new()),
+            (false, Reason::MissingUserId)
+        );
+    }
+
+    #[test]
+    fn explain_plain_enabled() {
+        let mut flags = FeatureFlags::new();
+        flags.set("f", FlagConfig::new(true));
+        assert_eq!(explain_reason(&flags, "f", &Context::new()), (true, Reason::Enabled));
+    }
+
+    fn matrix_flags() -> FeatureFlags {
+        let mut attrs = HashMap::new();
+        attrs.insert("plan".to_owned(), "enterprise".to_owned());
+
+        let mut flags = FeatureFlags::new();
+        flags.set("plain-on", FlagConfig::new(true));
+        flags.set("plain-off", FlagConfig::new(false));
+        flags.set("env", FlagConfig::new(true).with_environments(vec!["prod".into()]));
+        flags.set("attrs", FlagConfig::new(true).with_required_attributes(attrs.clone()));
+        flags.set("rollout-50", FlagConfig::new(true).with_rollout(50));
+        flags.set("rollout-0", FlagConfig::new(true).with_rollout(0));
+        flags.set(
+            "kitchen-sink",
+            FlagConfig::new(true)
+                .with_rollout(30)
+                .with_environments(vec!["prod".into(), "staging".into()])
+                .with_required_attributes(attrs)
+                .with_allowed_users(vec!["alice".into(), "mallory".into()])
+                .with_disallowed_users(vec!["mallory".into()])
+                .with_allowed_roles(vec!["admin".into()]),
+        );
+        flags.set(
+            "off-targeted",
+            FlagConfig::new(false).with_allowed_users(vec!["alice".into()]),
+        );
+        flags
+    }
+
+    fn matrix_contexts() -> Vec<Context> {
+        let mut out = vec![Context::new()];
+        for user in [None, Some("alice"), Some("bob"), Some("mallory"), Some("user-7")] {
+            for env in [None, Some("prod"), Some("staging"), Some("dev")] {
+                for role in [None, Some("admin"), Some("viewer")] {
+                    for plan in [None, Some("enterprise"), Some("free")] {
+                        let mut ctx = Context::new();
+                        if let Some(u) = user {
+                            ctx = ctx.with_user_id(u);
+                        }
+                        if let Some(e) = env {
+                            ctx = ctx.with_environment(e);
+                        }
+                        if let Some(r) = role {
+                            ctx = ctx.with_role(r);
+                        }
+                        if let Some(p) = plan {
+                            ctx = ctx.with_attribute("plan", p);
+                        }
+                        out.push(ctx);
+                    }
+                }
+            }
+        }
+        for i in 0..50 {
+            out.push(Context::new().with_user_id(format!("user-{i}")).with_environment("prod"));
+        }
+        out
+    }
+
+    #[test]
+    fn explain_agrees_with_is_enabled_for_across_matrix() {
+        let flags = matrix_flags();
+        let mut names = flags.all_flags();
+        names.push("missing".into());
+        for ctx in matrix_contexts() {
+            for name in &names {
+                let e = flags.explain(name, &ctx);
+                assert_eq!(e.enabled, flags.is_enabled_for(name, &ctx), "{name} {ctx:?}");
+                assert_eq!(e.enabled, flags.evaluate_with_config(name, &ctx), "{name} {ctx:?}");
+            }
+        }
+    }
+
+    // --- evaluate_all ---
+
+    #[test]
+    fn evaluate_all_matches_individual_evaluation() {
+        let flags = matrix_flags();
+        for ctx in matrix_contexts() {
+            let all = flags.evaluate_all(&ctx);
+            assert_eq!(all.len(), flags.len());
+            for (name, enabled) in &all {
+                assert_eq!(*enabled, flags.is_enabled_for(name, &ctx));
+            }
+        }
+    }
+
+    #[test]
+    fn evaluate_all_sorted_and_empty() {
+        assert!(FeatureFlags::new().evaluate_all(&Context::new()).is_empty());
+        let flags = matrix_flags();
+        let keys: Vec<String> = flags.evaluate_all(&Context::new()).into_keys().collect();
+        assert_eq!(keys, flags.all_flags());
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn evaluation_serializes() {
+        let e = Evaluation { enabled: true, reason: Reason::AllowedRole };
+        let json = serde_json::to_string(&e).unwrap();
+        assert_eq!(json, r#"{"enabled":true,"reason":"AllowedRole"}"#);
+        let back: Evaluation = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, e);
     }
 }

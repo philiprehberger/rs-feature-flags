@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 (2026-10-30)
+
+- Add `FeatureFlags::explain()` returning an `Evaluation` (`enabled` plus a `Reason`) that names the rule that decided the outcome; `is_enabled_for()` and `evaluate_with_config()` now delegate to it, so the explanation can never disagree with the decision
+- Add `Evaluation` struct and `#[non_exhaustive]` `Reason` enum (with `Serialize`/`Deserialize` under the `serde` feature)
+- Add `FeatureFlags::evaluate_all()` to evaluate every flag for one context as a name-sorted `BTreeMap<String, bool>`
+- Reorder `Cargo.toml` fields to the standard template and add a `[dev-dependencies]` section
+- Drop redundant "for Rust" from the crate description
+- Regroup README API section into per-type tables
+
 ## 0.4.0 (2026-07-15)
 
 - Add `FeatureFlags::variant_for()` to resolve an A/B variant from a flag's stored `variants` (set via `with_variants`) using the user ID from a `Context`, closing the gap where configured variants were previously unused by evaluation
